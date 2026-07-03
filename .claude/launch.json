@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "long-way-round",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["--yes", "http-server", "-p", "4517", "-c-1", "."],
+      "port": 4517
+    }
+  ]
+}

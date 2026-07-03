@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Long Way Round — the surprising chain between any two things</title>
+<meta name="description" content="Give it two things — Medicaid and the banjo, say — and it finds the most interesting (not shortest) path between them through Wikidata, then narrates the journey.">
+<link rel="icon" type="image/png" href="assets/generated/generated-compass-badge-001.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=Newsreader:ital,opsz,wght@0,6..72,300..700;1,6..72,300..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="hero">
+  <img class="hero-art" src="assets/generated/generated-hero-journey-001.png" alt="A winding road threading through mountains, desert, sea cliffs, farmland and a distant city — vintage travel-poster style (generated art, decorative only)">
+  <div class="hero-scrim"></div>
+  <div class="hero-inner">
+    <img class="hero-badge" src="assets/generated/generated-compass-badge-001.png" alt="" aria-hidden="true">
+    <h1 class="hero-title">The Long Way Round</h1>
+    <p class="hero-tagline">The surprising chain between any two things.</p>
+  </div>
+</header>
+
+<main>
+  <!-- ─────────── Departure board ─────────── -->
+  <section class="board" id="board">
+    <p class="board-lede">Everyone knows the shortest distance between two points is a straight line.<br><em>This is not that.</em> Name two things — any two — and we’ll chart the scenic route between them through the world’s knowledge.</p>
+
+    <form class="controls" id="controls" autocomplete="off">
+      <div class="field" id="field-from">
+        <label for="input-from">Setting out from</label>
+        <input id="input-from" type="text" placeholder="Medicaid" spellcheck="false" aria-describedby="hint-from">
+        <div class="ac-list" id="ac-from" role="listbox"></div>
+        <div class="picked" id="picked-from" hidden></div>
+      </div>
+
+      <button type="button" class="swap" id="btn-swap" title="Swap ends" aria-label="Swap the two ends">⇄</button>
+
+      <div class="field" id="field-to">
+        <label for="input-to">Bound for</label>
+        <input id="input-to" type="text" placeholder="banjo" spellcheck="false">
+        <div class="ac-list" id="ac-to" role="listbox"></div>
+        <div class="picked" id="picked-to" hidden></div>
+      </div>
+    </form>
+
+    <div class="board-actions">
+      <button class="btn btn-dice" id="btn-dice" type="button" title="Pick a random pair">🎲 Surprise me</button>
+      <button class="btn btn-go" id="btn-go" type="button">Set off the long way&nbsp;→</button>
+    </div>
+    <p class="board-error" id="board-error" role="alert" hidden></p>
+  </section>
+
+  <!-- ─────────── Expedition (live search) ─────────── -->
+  <section class="expedition" id="expedition" hidden>
+    <div class="expedition-head">
+      <h2 class="section-title" id="expedition-title">Charting the route…</h2>
+      <div class="ticker" id="ticker" aria-live="polite">Consulting the atlas…</div>
+    </div>
+    <div class="constellation-wrap">
+      <svg id="constellation" role="img" aria-label="Live map of the search: two constellations of ideas growing toward each other"></svg>
+      <div class="constellation-legend">
+        <span class="leg leg-from"><i></i><b id="leg-from-label">From</b></span>
+        <span class="leg leg-to"><i></i><b id="leg-to-label">To</b></span>
+        <span class="leg leg-meet"><i></i>where they meet</span>
+      </div>
+      <div class="constellation-stats">
+        <span><b id="stat-explored">0</b> byways explored</span>
+        <span><b id="stat-frontier">0</b> trails open</span>
+        <span><b id="stat-meetings">0</b> crossings found</span>
+      </div>
+      <div class="constellation-hint">Click any dot to inspect it — make it an endpoint, ban it, or route through it.</div>
+    </div>
+  </section>
+
+  <!-- ─────────── The Tale (result) ─────────── -->
+  <section class="tale" id="tale" hidden>
+    <div class="tale-head">
+      <div class="tale-kicker">A dispatch from the field</div>
+      <h2 class="tale-title" id="tale-title"></h2>
+      <p class="tale-intro" id="tale-intro"></p>
+      <p class="shortcut-tease" id="shortcut-tease" hidden></p>
+      <div class="route-options" id="route-options" hidden></div>
+    </div>
+
+    <div class="journey" id="journey">
+      <svg class="journey-road" id="journey-road" aria-hidden="true"></svg>
+      <ol class="journey-stops" id="journey-stops"></ol>
+    </div>
+
+    <p class="tale-outro" id="tale-outro"></p>
+
+    <div class="tale-stats" id="tale-stats"></div>
+
+    <div class="tale-actions">
+      <button class="btn btn-again" id="btn-again" type="button">↻ Take an even longer way</button>
+      <button class="btn btn-copy" id="btn-copy" type="button">✎ Copy the tale</button>
+      <button class="btn btn-share" id="btn-share" type="button">⚲ Copy route link</button>
+      <button class="btn btn-new" id="btn-new" type="button">＋ New expedition</button>
+    </div>
+  </section>
+
+  <!-- ─────────── No route ─────────── -->
+  <section class="lost" id="lost" hidden>
+    <h2 class="section-title">The trail went cold.</h2>
+    <p id="lost-text">Even the long way round has its limits — we rummaged through the atlas and couldn’t join these two before the lanterns ran low. Try once more (the dice fall differently each time), or pick a slightly less lonely pair.</p>
+    <div class="tale-actions">
+      <button class="btn btn-again" id="btn-retry" type="button">↻ Try again</button>
+      <button class="btn btn-new" id="btn-lost-new" type="button">＋ New expedition</button>
+    </div>
+  </section>
+
+  <!-- ─────────── Under the hood ─────────── -->
+  <section class="hood">
+    <details>
+      <summary>Under the hood — how the scenic route is found</summary>
+      <div class="hood-body">
+        <p>This is a live <b>bidirectional stochastic beam search</b> over the <a href="https://www.wikidata.org" target="_blank" rel="noopener">Wikidata</a> knowledge graph — more than 100&nbsp;million entities, queried in real time from your browser. Both endpoints grow a frontier outward along entity-to-entity statements, and the two constellations race to meet in the middle.</p>
+        <p>The trick is the objective. Shortest paths through a knowledge graph are almost always dull — everything is an <i>instance of</i> something, in some <i>country</i>, speaking some <i>language</i>. So instead of distance, we optimize <b>interestingness</b>:</p>
+        <ul>
+          <li><b>Property informativeness.</b> Each of the graph’s relation types carries a hand-tuned weight, playing the role of inverse property frequency: taxonomic glue (<i>instance of</i>, <i>country</i>, <i>gender</i>) is penalized or pruned outright, while high-surprise relations (<i>named after</i>, <i>inspired by</i>, <i>discoverer or inventor</i>, <i>present in work</i>) are rewarded.</li>
+          <li><b>Hub damping.</b> Mega-hubs (the United States, “human”, the English language) would otherwise vacuum every path through themselves — a degree-based penalty keeps the route off the interstate, which is the same intuition behind degree-weighted path relevance and PageRank teleport damping.</li>
+          <li><b>Diversity pressure.</b> Repeating the same relation twice in a row is penalized, so the chain keeps changing key — no ten-link taxonomy ladders.</li>
+          <li><b>Concreteness prior.</b> Stops with a face — a photograph, a birthdate, a place on the map — make satisfying stories; bare abstractions do not. Nodes that are classes of things tax every route through them, and the very small set of ultra-generic concepts (“human”, “organization”, “education”) is barred from serving as a through-station at all: <i>“X is a human, and so is Y”</i> explains nothing.</li>
+          <li><b>Launch and land on specifics.</b> Generic glue relations are penalized extra hard on the first hop out of either endpoint, so journeys start and finish with their most particular facts.</li>
+          <li><b>Endpoints look both ways.</b> The search walks <i>outgoing</i> statements (which keeps mega-hubs tame), but an abstract destination has only abstractions downstream — its liveliest neighbors are the people, works and events whose own pages point <i>at</i> it. So both endpoints also sample their incoming statements with a live SPARQL query, giving concepts concrete first steps.</li>
+          <li><b>Gumbel-perturbed beam.</b> Each edge score gets Gumbel noise before the beam keeps its top-k, which makes every run a fresh sample from the near-optimal path distribution (the “Gumbel top-k” trick) — ask twice, get two different scenic routes.</li>
+          <li><b>No pointless detours.</b> A route should be an <i>induced path</i>: if an early stop links straight to a later one, the stop in between was padding. Such chords are pruned during the walk and rejected again at the finish — no more “label → album → band” when the label already knew the band.</li>
+          <li><b>Hubs only through the front door.</b> A mega-hub like the United States may be entered only by a relation that carries a story (<i>named after</i>, <i>discovered by</i>) — never by bureaucratic glue like <i>country of citizenship</i>.</li>
+          <li><b>Meet-in-the-middle, then rerank.</b> When the frontiers touch, joined paths are re-scored with a length-shaping term that prefers seven-ish-hop routes, and the finalists face one last judge — labels <i>and</i> claims fetched — that counts reader-visible defects (duplicate names, chords, edition items, unlabelled stops) and keeps the cleanest. This retrieve-then-rerank pass is why the route you read is legible even when the search that found it was messy. The dull direct shortcut, if one exists, is confessed to separately.</li>
+        </ul>
+        <p>Endpoints themselves are resolved by <b>notability, not keyword-guessing</b>: among everything sharing a typed name, we pick the one described in the most Wikipedias — so “Cleopatra” is the queen, not the freshwater snail, and “The Beatles” is the band, not the 1968 double LP.</p>
+        <p>And the graph is yours to poke: click any dot on the map to inspect it, make it an endpoint, ban it, force the route through it, or <b>wander its real connections one node at a time</b> — a live knowledge-graph explorer. Every relation chip on a stop card links to the underlying statement on Wikidata. The narration is assembled relation-by-relation from direction-aware templates, and every fact in the chain is a real, sourced claim — the artwork is generated (decorative only); the connections are not.</p>
+      </div>
+    </details>
+  </section>
+</main>
+
+<footer class="footer">
+  <img class="footer-range" src="assets/generated/generated-footer-range-001.png" alt="" aria-hidden="true">
+  <p>Every step is a real statement in <a href="https://www.wikidata.org" target="_blank" rel="noopener">Wikidata</a>, CC0 — the sum of what humanity has bothered to write down. · Artwork is AI-generated, decorative only. · Built as a love letter to curiosity.</p>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
