@@ -185,6 +185,7 @@ export const PROP_META = {
   P7763: { w: -9, label: 'copyright status as a creator' }, // yet another copyright wormhole
   P141:  { w: -9, label: 'IUCN conservation status' },      // "Vulnerable" connects half of biology
   P853:  { w: -9, label: 'CERO rating' },                   // "All ages" connects every game
+  P2643: { w: -9, label: 'Carnegie Classification' },       // institutional metadata, not a story
   P852:  { w: -9, label: 'ESRB rating' },
   P908:  { w: -9, label: 'PEGI rating' },
   P1657: { w: -9, label: 'MPA film rating' },
@@ -305,6 +306,23 @@ export const FORBIDDEN_NODES = new Set([
   'Q202444',   // given name
   'Q19478619', // metaclass
   'Q23766486', // list of values as qualifiers (Wikidata plumbing)
+  // ubiquitous stuff-of-everything: "contains carbon" describes most of
+  // the observable universe and therefore explains none of it
+  'Q623',      // carbon
+  'Q629',      // oxygen
+  'Q556',      // hydrogen
+  'Q627',      // nitrogen
+  'Q283',      // water
+  'Q11344',    // chemical element
+  'Q11173',    // chemical compound
+  'Q79529',    // chemical substance
+  'Q174211',   // organic compound
+  'Q12136',    // disease
+  'Q12140',    // medication
+  'Q7239',     // organism
+  'Q729',      // animal
+  'Q756',      // plant
+  'Q2095',     // food (the class)
 ]);
 
 /** Concreteness prior, computed when a node is expanded and
@@ -315,12 +333,12 @@ export const FORBIDDEN_NODES = new Set([
 export function classPenalty(entity) {
   const c = (entity && entity.claims) || {};
   let p = 0;
-  if (c.P279) p -= 1.25;                // it's a class of things
+  if (c.P279) p -= 1.8;                 // it's a class of things
   if (c.P18) p += 0.4;                  // has a picture
   if (c.P569 || c.P570) p += 0.35;      // born / died — a life
   if (c.P625) p += 0.3;                 // somewhere on the map
   if (c.P571 || c.P577) p += 0.2;       // came into being at a moment
-  return Math.max(-1.5, Math.min(0.9, p));
+  return Math.max(-2.2, Math.min(0.9, p));
 }
 
 /** Degree damping applied when a node is expanded: busy nodes tax
