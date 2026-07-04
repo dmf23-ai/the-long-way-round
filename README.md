@@ -1,6 +1,6 @@
 # The Long Way Round
 
-**The surprising chain between any two things.**
+**The surprising chain between any two things.** · **Live at [thelongwayround.net](https://thelongwayround.net)**
 
 Give it two entities — *Medicaid* and *the banjo*, say — and The Long Way Round finds the most **interesting** (deliberately not shortest) path between them through the live Wikidata knowledge graph, draws the search as two constellations racing to meet, then narrates the journey stop by stop like a dispatch from a slightly unhinged travel writer.
 

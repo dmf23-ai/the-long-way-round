@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "allow": [
+      "Bash",
+      "PowerShell",
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "WebFetch",
+      "WebSearch",
+      "ToolSearch",
+      "Skill",
+      "mcp__claude-in-chrome",
+      "mcp__computer-use",
+      "mcp__Claude_Preview",
+      "mcp__codex-collective",
+      "mcp__visualize",
+      "mcp__ccd_session"
+    ]
+  }
+}
