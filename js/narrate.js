@@ -154,6 +154,16 @@ const T = {
   P131:  { fwd: ['{a} sits within {b}'], rev: ['{b} sits within {a}'] },
   P36:   { fwd: ['{a}’s capital is {b}'], rev: ['{b}’s capital is {a}'] },
   P47:   { fwd: ['{a} shares a border with {b}'], rev: ['{b} shares a border with {a}'] },
+  P276:  { fwd: ['{a} is to be found in {b}'], rev: ['{b} is to be found in {a}'] },
+  P30:   { fwd: ['{a} lies on the continent of {b}'], rev: ['{b} lies on the continent of {a}'] },
+  P195:  { fwd: ['{a} lives in the collection of {b}'], rev: ['{b} holds {a} in its collection'] },
+  P2541: { fwd: ['{a} operates across {b}'], rev: ['{b} is where {a} operates'] },
+  P9493: { fwd: ['{a}’s artist file is kept at {b}'], rev: ['{b}’s artist file is kept at {a}'] },
+  P407:  { fwd: ['{a} is written in {b}'], rev: ['{b} is the language of {a}'] },
+  P1412: { fwd: ['{a} spoke {b}'], rev: ['{b} was a tongue of {a}'] },
+  P277:  { fwd: ['{a} is written in {b}'], rev: ['{b} is the language {a} is written in'] },
+  P1416: { fwd: ['{a} is affiliated with {b}'], rev: ['{b} is affiliated with {a}'] },
+  P162:  { fwd: ['{a} was produced by {b}'], rev: ['{a} produced {b}'] },
 };
 
 export { T as TEMPLATES };

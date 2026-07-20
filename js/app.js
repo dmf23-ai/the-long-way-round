@@ -7,7 +7,8 @@ import { searchEntities, resolveEntity, getCards, getPropertyLabels, getInterest
 import { findPath, computeUsedEdges, trimCycles } from './pathfinder.js';
 import { narrate } from './narrate.js';
 import { Constellation, drawRoad } from './viz.js';
-import { PROP_META, propLabel, propWeight, makeRng, PRUNE } from './scoring.js';
+import { PROP_META, propLabel, propWeight, makeRng, PRUNE, isForbiddenStation } from './scoring.js';
+import { SEEDS } from './seeds.js';
 
 const $ = id => document.getElementById(id);
 
@@ -29,18 +30,56 @@ const el = {
   lost: $('lost'), btnRetry: $('btn-retry'), btnLostNew: $('btn-lost-new'),
 };
 
-/* ─────────── delightful seed pairs for the dice ─────────── */
+/* ─────────── the dice: a shuffle-bag over the seed pool ───────────
+   Seeds ship pre-resolved ({id,label,description} — see js/seeds.js),
+   so the dice locks both endpoints instantly and can never resolve to
+   a family name or a same-named EP. The bag guarantees no term repeats
+   until the whole deck has been walked (~200 clicks), surviving
+   reloads via localStorage. */
 
-const SEEDS = [
-  'Medicaid', 'banjo', 'croissant', 'black hole', 'Genghis Khan', 'Eiffel Tower',
-  'penicillin', 'tango', 'Saturn', 'Bauhaus', 'sushi', 'Alan Turing', 'ukulele',
-  'Route 66', 'Marie Curie', 'chess', 'bubble wrap', 'Mount Everest', 'jazz',
-  'Rosetta Stone', 'Nintendo', 'absinthe', 'lighthouse', 'Vincent van Gogh',
-  'accordion', 'Antarctica', 'typewriter', 'origami', 'Hubble Space Telescope',
-  'Cleopatra', 'maple syrup', 'roller coaster', 'Sherlock Holmes', 'platypus',
-  'disco', 'Trans-Siberian Railway', 'sourdough', 'Morse code', 'kimono',
-  'the Moon', 'harmonica', 'Petra', 'Niagara Falls', 'saxophone', 'Voyager 1',
-];
+const DECK_KEY = 'lwr-seed-deck';
+const DECK_VERSION = 1;
+
+function loadDeck() {
+  try {
+    const d = JSON.parse(localStorage.getItem(DECK_KEY));
+    if (d && d.v === DECK_VERSION && d.size === SEEDS.length
+      && Array.isArray(d.order) && d.order.length === SEEDS.length
+      && Number.isInteger(d.cursor) && d.cursor >= 0 && d.cursor <= d.order.length
+      && new Set(d.order).size === SEEDS.length
+      && d.order.every(i => Number.isInteger(i) && i >= 0 && i < SEEDS.length)) return d;
+  } catch { /* corrupted or unavailable storage: fresh deck */ }
+  return null;
+}
+function saveDeck(d) {
+  try { localStorage.setItem(DECK_KEY, JSON.stringify(d)); } catch { /* private mode etc. */ }
+}
+function reshuffledDeck(avoid = new Set()) {
+  const order = SEEDS.map((_, i) => i);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  // don't let the fresh deck open with the pair the traveler just saw
+  for (let k = 0; k < 2 && k < order.length; k++) {
+    if (!avoid.has(order[k])) continue;
+    for (let m = order.length - 1; m > 2; m--) {
+      if (!avoid.has(order[m])) { [order[k], order[m]] = [order[m], order[k]]; break; }
+    }
+  }
+  return { v: DECK_VERSION, size: SEEDS.length, order, cursor: 0 };
+}
+let seedDeck = loadDeck();
+function drawSeedPair() {
+  if (!seedDeck) seedDeck = reshuffledDeck();
+  if (seedDeck.cursor + 2 > seedDeck.order.length) {
+    seedDeck = reshuffledDeck(new Set(seedDeck.order.slice(-2)));
+  }
+  const a = SEEDS[seedDeck.order[seedDeck.cursor++]];
+  const b = SEEDS[seedDeck.order[seedDeck.cursor++]];
+  saveDeck(seedDeck);
+  return [a, b];
+}
 
 const TICKER_LINES = [
   'Rummaging through the world’s attic…',
@@ -142,11 +181,9 @@ el.btnSwap.addEventListener('click', () => {
 });
 
 el.btnDice.addEventListener('click', () => {
-  const i = Math.floor(Math.random() * SEEDS.length);
-  let j; do { j = Math.floor(Math.random() * SEEDS.length); } while (j === i);
-  el.inputFrom.value = SEEDS[i]; el.inputTo.value = SEEDS[j];
-  state.from = null; state.to = null;
-  el.pickedFrom.hidden = true; el.pickedTo.hidden = true;
+  const [a, b] = drawSeedPair();
+  applyPicked('from', a);
+  applyPicked('to', b);
   el.error.hidden = true;
 });
 
@@ -172,6 +209,7 @@ el.btnShare.addEventListener('click', async () => {
   u.searchParams.set('fl', state.from.label);
   u.searchParams.set('tl', state.to.label);
   if (state.seed != null) u.searchParams.set('seed', String(state.seed));
+  if (state.requiredHops) u.searchParams.set('mh', String(state.requiredHops));
   await navigator.clipboard.writeText(u.toString());
   flashButton(el.btnShare, '✓ Link copied');
 });
@@ -215,13 +253,17 @@ async function go(seedOverride = null) {
   if (!from || !to) { showError('Name both ends of the journey — anything at all. Try the dice.'); return; }
   if (from.id === to.id) { showError('That trip takes zero steps, however you slice it. Pick two different things.'); return; }
 
-  // a new pair means a fresh expedition: forget the old route's grudges
+  // a new pair means a fresh expedition: forget the old route's grudges —
+  // and the old route itself, so its hop count can't leak into escalation
   const pairKey = from.id + '|' + to.id;
   if (pairKey !== state.lastPairKey) {
     state.lastPairKey = pairKey;
     state.avoidEdges = new Set();
     state.requiredHops = null;
     state.temperature = 0.7;
+    state.lastResult = null;
+    state.activeRoute = null;
+    state.routeOptions = null;
   }
 
   state.running = true;
@@ -267,30 +309,43 @@ async function go(seedOverride = null) {
   };
 
   // when the traveler demands a longer way, dig deeper and search wider —
-  // and if the first cast comes up short, cast the net once more
-  const minHops = state.requiredHops || 4;
-  const stretch = Math.max(0, minHops - 4);
+  // and if the first cast comes up short (or leans on a too-famous
+  // crossroads), cast the net once more with the offenders avoided
+  const minHops = state.requiredHops || 7;
+  const stretch = Math.max(0, minHops - 7);
+
+  // cast quality: broad-free beats tainted, floor-meeting beats short,
+  // then longer beats shorter — the best cast is what we show
+  const castQuality = (r) => !r?.path ? -1
+    : (r.taintedBroad?.length ? 0 : 2) + (r.path.hopCount >= minHops ? 1 : 0);
 
   let result = null, failure = null;
+  const broadAvoid = new Set();
   try {
     for (let attempt = 0; attempt < 2; attempt++) {
       const r = await findPath(from.id, to.id, {
         seed: state.seed ^ (attempt * 0x55555555),
         temperature: state.temperature + attempt * 0.2,
         avoidEdges: state.avoidEdges,
-        avoidNodes: state.avoidNodes,
+        avoidNodes: broadAvoid.size ? new Set([...state.avoidNodes, ...broadAvoid]) : state.avoidNodes,
         minHops,
-        maxRounds: 11 + stretch + attempt * 2,
-        maxDepthPerSide: 6 + Math.ceil(stretch / 2) + attempt,
-        nodeBudget: 560 + stretch * 90 + attempt * 220,
+        maxRounds: 13 + stretch + attempt * 2,
+        maxDepthPerSide: 7 + Math.ceil(stretch / 2) + attempt,
+        nodeBudget: 720 + stretch * 90 + attempt * 220,
         onEvent,
         control: state.control,
       });
-      if (!result || (r.path && (!result.path || r.path.hopCount > result.path.hopCount))) result = r;
+      if (!result || castQuality(r) > castQuality(result)
+        || (castQuality(r) === castQuality(result) && r.path && result.path
+            && r.path.hopCount > result.path.hopCount)) result = r;
       if (state.control.cancelled) break;
-      if (result.path && result.path.hopCount >= minHops) break;
-      if (attempt === 0 && minHops > 4) setTicker(`Still too direct for our taste — casting a wider net…`);
-      else break;
+      if (r.path && r.path.hopCount >= minHops && !(r.taintedBroad || []).length) break;
+      if (attempt === 0) {
+        for (const q of r.taintedBroad || []) broadAvoid.add(q);
+        setTicker((r.taintedBroad || []).length
+          ? 'That road leaned on a crossroads half the world walks through — recharting around it…'
+          : 'Still too direct for our taste — casting a wider net…');
+      }
     }
   } catch (e) {
     failure = e;
@@ -323,10 +378,18 @@ async function go(seedOverride = null) {
   state.activeRoute = result.path;
   await presentTale(result, from, to);
 
-  // if a longer way was demanded but the atlas came up short, own up to it
-  if (state.requiredHops && result.path.hopCount < state.requiredHops) {
-    setTicker(`The scenic road ran out at ${result.path.hopCount} steps — no route of ${state.requiredHops} materialized, so here’s a different one instead.`);
+  // honesty corner: if the shown road misses the floor or couldn't shake a
+  // too-famous crossroads, say so plainly
+  const confessions = [];
+  if (result.path.hopCount < minHops) {
+    confessions.push(`no route of ${minHops} steps materialized — this one runs ${result.path.hopCount}`);
   }
+  if ((result.taintedBroad || []).length) {
+    const names = result.taintedBroad
+      .map(q => result.labels?.get(q) || q).join(', ');
+    confessions.push(`the road couldn’t avoid passing through ${names}`);
+  }
+  if (confessions.length) setTicker(`A confession: ${confessions.join('; ')}.`);
 }
 
 /* ── "take an even longer way": every click raises the bar ── */
@@ -338,8 +401,10 @@ async function rerun() {
     for (const k of state.lastResult.usedEdges) state.avoidEdges.add(k);
   }
   state.temperature = Math.min(1.6, state.temperature + 0.2);
-  const lastHops = state.activeRoute?.hopCount || state.lastResult?.path?.hopCount || 4;
-  state.requiredHops = Math.min(12, Math.max(state.requiredHops || 0, lastHops + 1));
+  // escalate past the last route if there was one; a retry after a lost
+  // trail just re-demands the floor, never less than 7
+  const lastHops = state.activeRoute?.hopCount || state.lastResult?.path?.hopCount || null;
+  state.requiredHops = Math.min(12, Math.max(7, state.requiredHops || 0, lastHops ? lastHops + 1 : 7));
   setTicker(`Very well — nothing shorter than ${state.requiredHops} steps this time.`);
   go();
 }
@@ -349,6 +414,13 @@ async function rerun() {
 async function runVia(waypointId) {
   if (state.running || !state.from || !state.to) return;
   if (waypointId === state.from.id || waypointId === state.to.id) return;
+  // the generality rule holds even for chosen detours: routing through
+  // "actor" on purpose is still a journey to nowhere
+  if (isForbiddenStation(waypointId)) {
+    setTicker('That crossroads is one half the world walks through — a detour there would explain nothing. Pick a more particular waypoint.');
+    hidePopover();
+    return;
+  }
   hidePopover();
 
   const from = state.from, to = state.to;
@@ -760,7 +832,7 @@ async function showNodePopover(id) {
   }
 }
 
-function setEndpoint(key, ent) {
+function applyPicked(key, ent) {
   state[key] = ent;
   const input = key === 'from' ? el.inputFrom : el.inputTo;
   const picked = key === 'from' ? el.pickedFrom : el.pickedTo;
@@ -770,6 +842,10 @@ function setEndpoint(key, ent) {
   const b = document.createElement('b');
   b.textContent = ent.label;
   picked.append(b, ent.description ? ` — ${ent.description}` : ' — locked in');
+}
+
+function setEndpoint(key, ent) {
+  applyPicked(key, ent);
   hidePopover();
   go();
 }
@@ -801,6 +877,12 @@ window.addEventListener('resize', () => scheduleRoad());
   state.to = { id: to, label: p.get('tl') || to, description: '' };
   el.inputFrom.value = state.from.label;
   el.inputTo.value = state.to.label;
+  const mh = Number(p.get('mh'));
+  if (Number.isFinite(mh) && mh > 7) {
+    state.requiredHops = Math.min(12, mh);
+    // pre-claim the pair so go() doesn't wipe the demanded floor
+    state.lastPairKey = from + '|' + to;
+  }
   const seed = p.get('seed');
   go(seed != null ? Number(seed) : null);
 })();

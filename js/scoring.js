@@ -9,6 +9,8 @@
    Positive = delightful, negative = boring, ≤ PRUNE = never.
    ══════════════════════════════════════════════════════════════ */
 
+import { BROAD_NODES } from './broad-nodes.gen.js';
+
 export const PRUNE = -3;          // edges at or below this weight are never taken
 export const STEP_COST = 1.0;     // per-hop toll: only genuinely interesting edges pay their way
 export const DEFAULT_PROP_WEIGHT = 0.35; // unfamiliar relations are mildly promising
@@ -307,7 +309,10 @@ export const FORBIDDEN_NODES = new Set([
   'Q19478619', // metaclass
   'Q23766486', // list of values as qualifiers (Wikidata plumbing)
   // ubiquitous stuff-of-everything: "contains carbon" describes most of
-  // the observable universe and therefore explains none of it
+  // the observable universe and therefore explains none of it. These sit
+  // BELOW the generality rule's in-degree threshold yet still read as
+  // arriving nowhere — the hand list exists for exactly this band.
+  'Q4',        // death
   'Q623',      // carbon
   'Q629',      // oxygen
   'Q556',      // hydrogen
@@ -324,6 +329,22 @@ export const FORBIDDEN_NODES = new Set([
   'Q756',      // plant
   'Q2095',     // food (the class)
 ]);
+
+/* ── the generality rule ──────────────────────────────────────
+   A node that is a class of things (has P279) with at least
+   BROAD_IN_DEGREE incoming statements is never a through-station:
+   every singer links to "voice", every actor to "actor" — arriving
+   there explains nothing. Threshold set by David 2026-07-19 (bans
+   actor/politician/voice/composer/jazz/chess; spares lighthouse).
+   BROAD_NODES is the compiled cache of this rule (see
+   broad-nodes.gen.js); the pathfinder's rerank gate is the live
+   authority for anything the compilation missed. */
+
+export const BROAD_IN_DEGREE = 12000;
+
+export function isForbiddenStation(qid) {
+  return FORBIDDEN_NODES.has(qid) || BROAD_NODES.has(qid);
+}
 
 /** Concreteness prior, computed when a node is expanded and
     applied to every path that continues through it. Things with

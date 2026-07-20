@@ -10,13 +10,18 @@
    shaping term that prefers five-to-eight-hop routes.
    ══════════════════════════════════════════════════════════════ */
 
-import { getEntities, extractLinks, getItemLabels, getIncomingLinks } from './wikidata.js';
+import { getEntities, extractLinks, getItemLabels, getIncomingLinks, cappedInDegree } from './wikidata.js';
 import {
   propWeight, hubPenalty, degreePenalty, shapeBonus, classPenalty,
-  gumbel, makeRng, PRUNE, STEP_COST, FORBIDDEN_NODES,
+  gumbel, makeRng, PRUNE, STEP_COST, isForbiddenStation, BROAD_IN_DEGREE,
 } from './scoring.js';
 
 const edgeKey = (a, p, b) => `${a}|${p}|${b}`;
+
+// session cache for live generality checks: qid -> capped incoming count.
+// Counts are capped at BROAD_IN_DEGREE, so entries are verdicts for the
+// current threshold; failures are never cached (unknown ≠ safe).
+const inDegreeCache = new Map();
 
 function pathNodes(sideOrigin, entry) {
   const nodes = [sideOrigin];
@@ -35,11 +40,11 @@ export async function findPath(fromId, toId, opts = {}) {
   const {
     seed = (Date.now() & 0x7fffffff),
     temperature = 0.6,
-    minHops = 4,
+    minHops = 7,
     beamWidth = 40,
-    maxRounds = 11,
-    maxDepthPerSide = 6,
-    nodeBudget = 560,
+    maxRounds = 13,
+    maxDepthPerSide = 7,
+    nodeBudget = 720,
     avoidEdges = new Set(),
     avoidNodes = new Set(),
     onEvent = () => {},
@@ -68,6 +73,10 @@ export async function findPath(fromId, toId, opts = {}) {
     getIncomingLinks(fromId).catch(() => []),
     getIncomingLinks(toId).catch(() => []),
   ];
+  // an endpoint's own label, so its first hop is never a same-named twin
+  // ("the Amazon river is named after the Amazon company" reads as a bug)
+  const normLabel = s => (s || '').trim().toLowerCase();
+  const originLabelPromise = getItemLabels([fromId, toId]).catch(() => new Map());
   const meetings = new Set();
   let goodMeetings = 0;
   let fetched = 0;
@@ -107,7 +116,7 @@ export async function findPath(fromId, toId, opts = {}) {
       // a forbidden node admitted as a desperate first hop may serve as a
       // meeting point, but never as a springboard — expanding it would let
       // "education" quietly become a through-station after all
-      if (FORBIDDEN_NODES.has(id) && id !== origins[0] && id !== origins[1]) continue;
+      if (isForbiddenStation(id) && id !== origins[0] && id !== origins[1]) continue;
 
       const links = extractLinks(ent, rng).map(l => ({ ...l, inv: false }));
       const degPen = degreePenalty(links.length) + classPenalty(ent);
@@ -124,6 +133,14 @@ export async function findPath(fromId, toId, opts = {}) {
           [inc[i], inc[j]] = [inc[j], inc[i]];
         }
         inc = inc.slice(0, 150);
+        // drop any incoming neighbor that carries the endpoint's own name — a
+        // first hop to a same-named twin ("Amazon named after Amazon") is never
+        // the interesting road, and reads as a bug in the tale
+        const myLabel = normLabel((await originLabelPromise).get(id));
+        if (myLabel) {
+          const srcLabels = await getItemLabels(inc.map(x => x.source)).catch(() => new Map());
+          inc = inc.filter(({ source }) => normLabel(srcLabels.get(source)) !== myLabel);
+        }
         for (const { prop, source } of inc) links.push({ prop, target: source, inv: true });
       }
 
@@ -140,7 +157,7 @@ export async function findPath(fromId, toId, opts = {}) {
         if (gpLinks && gpLinks.has(target)) continue;
         // ultra-generic classes never serve as through-stations; a sparse
         // endpoint may take one as its very first step, at a stiff price
-        const forbidden = FORBIDDEN_NODES.has(target)
+        const forbidden = isForbiddenStation(target)
           && target !== origins[0] && target !== origins[1];
         if (forbidden && !firstHop) continue;
 
@@ -251,6 +268,12 @@ export async function findPath(fromId, toId, opts = {}) {
   candidates.sort((x, y) => y.score - x.score);
   const shortest = candidates.slice().sort((x, y) => x.hopCount - y.hopCount)[0];
 
+  // stratified shortlist: floor-meeting candidates get first claim on the
+  // enrichment slots, so an all-short shortlist can't happen while a longer
+  // road waits at #17
+  const qualifiedC = candidates.filter(c => c.hopCount >= minHops);
+  const shortC = candidates.filter(c => c.hopCount < minHops);
+
   /* ── retrieve-then-rerank: judge the finalists by what a reader
      will actually see. Fetch labels AND claims for the top candidates,
      then reject routes with reader-visible defects:
@@ -260,7 +283,7 @@ export async function findPath(fromId, toId, opts = {}) {
        · edition items     — the Czech translation of a book is paperwork;
                              the work itself is the story                    ── */
 
-  const finalists = candidates.slice(0, 16);
+  const finalists = [...qualifiedC, ...shortC].slice(0, 16);
   const finalistIds = [...new Set(finalists.flatMap(c => c.nodes))];
   let labels = new Map();
   let ents = new Map();
@@ -306,19 +329,63 @@ export async function findPath(fromId, toId, opts = {}) {
     return n;
   };
 
-  finalists.forEach(c => { c._defects = defects(c); });
-  const minDefects = Math.min(...finalists.map(c => c._defects));
-  const pool = finalists.filter(c => c._defects === minDefects);
+  /* ── generality gate: the live authority. Class nodes (P279) whose
+     incoming degree reaches BROAD_IN_DEGREE never serve as through-
+     stations — the compiled set answers instantly, and unknown class
+     intermediates get a capped live count, in finalist order, under a
+     hard query budget. Failures stay unknown (never treated as safe,
+     never cached). ── */
 
-  const band = pool.filter(c => c.hopCount >= minHops && c.hopCount <= minHops + 5);
-  const scenic = pool.filter(c => c.hopCount >= minHops);
-  const path = (band[0] || scenic[0] || pool[0]);
+  const isClassNode = (id) => !!ents.get(id)?.claims?.P279;
+  const knownBroad = (id) =>
+    isForbiddenStation(id) || (inDegreeCache.get(id) ?? 0) >= BROAD_IN_DEGREE;
 
-  // alternates: next-best readable routes that are genuinely different roads
+  const unknownClassIds = [];
+  {
+    const seenIds = new Set();
+    for (const c of finalists) {
+      for (const id of c.nodes.slice(1, -1)) {
+        if (seenIds.has(id)) continue;
+        seenIds.add(id);
+        if (isForbiddenStation(id) || inDegreeCache.has(id)) continue;
+        if (isClassNode(id)) unknownClassIds.push(id);
+      }
+    }
+  }
+  const GATE_QUERY_BUDGET = 12;
+  for (let i = 0; i < unknownClassIds.length && i < GATE_QUERY_BUDGET; i += 3) {
+    const batch = unknownClassIds.slice(i, Math.min(i + 3, GATE_QUERY_BUDGET));
+    await Promise.all(batch.map(async id => {
+      const n = await cappedInDegree(id, BROAD_IN_DEGREE);
+      if (n != null) inDegreeCache.set(id, n);
+    }));
+    if (control.cancelled) break;
+  }
+
+  /* ── staged selection: broad-free → length floor → fewest defects →
+     scenic band. Each stage filters only if it leaves survivors, so the
+     worst case degrades to a confessed compromise, never a dead end. ── */
+
+  finalists.forEach(c => {
+    c._broad = c.nodes.slice(1, -1).filter(knownBroad);
+    c._defects = defects(c);
+  });
+  const broadFree = finalists.filter(c => c._broad.length === 0);
+  const stage1 = broadFree.length ? broadFree : finalists;
+  const longEnough = stage1.filter(c => c.hopCount >= minHops);
+  const stage2 = longEnough.length ? longEnough : stage1;
+  const minDefects = Math.min(...stage2.map(c => c._defects));
+  const pool = stage2.filter(c => c._defects === minDefects);
+
+  const band = pool.filter(c => c.hopCount <= minHops + 5);
+  const path = (band[0] || pool[0]);
+
+  // alternates: next-best readable routes that are genuinely different
+  // roads — and never below the floor the chosen road was held to
   const alternates = [];
   for (const c of pool) {
     if (c === path) continue;
-    if (c.hopCount < Math.max(2, minHops - 1)) continue;
+    if (c.hopCount < minHops) continue;
     const pathSet = new Set(path.nodes.slice(1, -1));
     const shared = c.nodes.slice(1, -1).filter(n => pathSet.has(n)).length;
     const inner = Math.max(1, c.nodes.length - 2);
@@ -335,6 +402,9 @@ export async function findPath(fromId, toId, opts = {}) {
     path,
     alternates,
     labels,
+    // broad through-stations the chosen route couldn't avoid (empty when clean):
+    // the app recasts with these avoided, then confesses if still stuck
+    taintedBroad: path._broad || [],
     shortest: shortest.hopCount < path.hopCount ? shortest : null,
     usedEdges: computeUsedEdges(path),
     stats: { explored: fetched, discovered, meetings: meetings.size, rounds, seed },

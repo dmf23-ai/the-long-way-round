@@ -178,6 +178,46 @@ export async function getIncomingLinks(qid, cap = 900) {
   return out;
 }
 
+/** Capped incoming-degree count: how many direct statements point at this
+    item, counting stops at `cap`. This is the generality rule's measuring
+    stick (see scoring.js BROAD_IN_DEGREE) — the same query shape the
+    broad-node generator uses, so compiled and live verdicts agree.
+    Returns a number, or null on failure/timeout (unknown, never "safe"). */
+export async function cappedInDegree(qid, cap = 20000, timeoutMs = 4000) {
+  const q = `SELECT (COUNT(*) AS ?c) WHERE {
+    { SELECT ?s ?p WHERE {
+        ?s ?p wd:${qid} .
+        FILTER(STRSTARTS(STR(?p), "http://www.wikidata.org/prop/direct/"))
+        FILTER(STRSTARTS(STR(?s), "http://www.wikidata.org/entity/Q"))
+      } LIMIT ${cap} }
+  }`;
+  const url = SPARQL + '?query=' + encodeURIComponent(q) + '&format=json';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, {
+        signal: ctrl.signal,
+        headers: { Accept: 'application/sparql-results+json', ...(NODE_HEADERS || {}) },
+      });
+      if ([429, 503, 504].includes(res.status) && attempt === 0) {
+        await new Promise(r => setTimeout(r, 1200));
+        continue;
+      }
+      if (!res.ok) return null;
+      const data = await res.json();
+      const c = Number(data.results?.bindings?.[0]?.c?.value);
+      return Number.isFinite(c) ? c : null;
+    } catch {
+      if (attempt === 0) continue; // one retry after abort/network hiccup
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return null;
+}
+
 /* ---------- claim helpers ---------- */
 
 /**
